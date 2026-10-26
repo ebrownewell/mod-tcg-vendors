@@ -2499,6 +2499,13 @@ static std::map<uint32, PendingBossDrop> s_pendingBossDrops;
 // members still produces exactly one drop roll.
 static std::set<ObjectGuid> s_processedBossKills;
 
+// Playerbots run on sessions without a socket. They can't redeem codes, so
+// they never get one, and a kill made only by bots doesn't roll at all.
+static bool IsBotPlayer(Player* player)
+{
+    return player->GetSession() && player->GetSession()->IsHeadless();
+}
+
 // ============================================================
 //  tcg_boss_drop_script  (PlayerScript)
 //  Uses OnPlayerCreatureKill to detect configured boss kills.
@@ -2527,6 +2534,23 @@ public:
         {
             return;
         }
+
+        // Only kills with at least one real player in the group roll.
+        bool hasRealPlayer = !IsBotPlayer(killer);
+        if (!hasRealPlayer)
+        {
+            if (Group* group = killer->GetGroup())
+            {
+                for (GroupReference* ref = group->GetFirstMember(); ref && !hasRealPlayer; ref = ref->next())
+                {
+                    Player* member = ref->GetSource();
+                    if (member && member->GetMap() == killed->GetMap() && !IsBotPlayer(member))
+                        hasRealPlayer = true;
+                }
+            }
+        }
+        if (!hasRealPlayer)
+            return;
 
         // The hook can fire once per credited group member for a single kill.
         // Dedupe on the corpse GUID so one boss yields one roll and one round
@@ -2573,7 +2597,7 @@ public:
                 for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
                 {
                     Player* member = ref->GetSource();
-                    if (member && member->GetMap() == killed->GetMap())
+                    if (member && member->GetMap() == killed->GetMap() && !IsBotPlayer(member))
                         participants.push_back(member);
                 }
             }
